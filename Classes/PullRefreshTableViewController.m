@@ -32,10 +32,9 @@
 
 #define REFRESH_HEADER_HEIGHT 52.0f
 
-
 @implementation PullRefreshTableViewController
 
-@synthesize textPull, textRelease, textLoading, refreshHeaderView, refreshLabel, refreshArrow, refreshSpinner;
+@synthesize moreLoadEnabled, textPull, textRelease, textLoading, refreshHeaderView, refreshLabel, refreshArrow, refreshSpinner, moreFooterView, moreLabel, moreSpinner;
 
 - (id)initWithStyle:(UITableViewStyle)style {
   self = [super initWithStyle:style];
@@ -56,6 +55,7 @@
 - (id)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
   self = [super initWithNibName:nibNameOrNil bundle:nibBundleOrNil];
   if (self != nil) {
+      moreLoadEnabled = NO;
     [self setupStrings];
   }
   return self;
@@ -63,7 +63,12 @@
 
 - (void)viewDidLoad {
   [super viewDidLoad];
+    
   [self addPullToRefreshHeader];
+    
+    if (moreLoadEnabled) {
+        [self addMoreLoadFooter];
+    }
 }
 
 - (void)setupStrings{
@@ -96,6 +101,28 @@
     [self.tableView addSubview:refreshHeaderView];
 }
 
+- (void)addMoreLoadFooter {
+    moreFooterView = [[UIView alloc] initWithFrame:CGRectMake(0, self.tableView.contentSize.height, 320, REFRESH_HEADER_HEIGHT)];
+    moreFooterView.backgroundColor = [UIColor clearColor];
+    
+    moreLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 320, REFRESH_HEADER_HEIGHT)];
+    moreLabel.backgroundColor = [UIColor clearColor];
+    moreLabel.font = [UIFont boldSystemFontOfSize:12.0];
+    moreLabel.textAlignment = NSTextAlignmentCenter;
+    moreLabel.text = @"Loading...";
+    
+    moreSpinner = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    moreSpinner.frame = CGRectMake(floorf(floorf(REFRESH_HEADER_HEIGHT - 20) / 2), floorf((REFRESH_HEADER_HEIGHT - 20) / 2), 20, 20);
+    moreSpinner.hidesWhenStopped = YES;
+    
+    [moreFooterView addSubview:moreLabel];
+    [moreFooterView addSubview:moreSpinner];
+    [self.tableView addSubview:moreFooterView];
+    
+    // Hide at first
+    [moreFooterView setHidden:YES];
+}
+
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView {
     if (isLoading) return;
     isDragging = YES;
@@ -110,17 +137,16 @@
             self.tableView.contentInset = UIEdgeInsetsMake(-scrollView.contentOffset.y, 0, 0, 0);
     } else if (isDragging && scrollView.contentOffset.y < 0) {
         // Update the arrow direction and label
-        [UIView animateWithDuration:0.25 animations:^{
-            if (scrollView.contentOffset.y < -REFRESH_HEADER_HEIGHT) {
-                // User is scrolling above the header
-                refreshLabel.text = self.textRelease;
-                [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI, 0, 0, 1);
-            } else { 
-                // User is scrolling somewhere within the header
-                refreshLabel.text = self.textPull;
-                [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI * 2, 0, 0, 1);
-            }
-        }];
+        [UIView beginAnimations:nil context:NULL];
+        if (scrollView.contentOffset.y < -REFRESH_HEADER_HEIGHT) {
+            // User is scrolling above the header
+            refreshLabel.text = self.textRelease;
+            [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI, 0, 0, 1);
+        } else { // User is scrolling somewhere within the header
+            refreshLabel.text = self.textPull;
+            [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI * 2, 0, 0, 1);
+        }
+        [UIView commitAnimations];
     }
 }
 
@@ -133,39 +159,81 @@
     }
 }
 
+- (void)tableView:(UITableView *)tableView willDisplayCell:(UITableViewCell *)cell forRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (!moreLoadEnabled) {
+        return;
+    }
+    
+    NSInteger lastSec = [self numberOfSectionsInTableView:tableView] - 1;
+    NSInteger lastRow = [self tableView:tableView numberOfRowsInSection:lastSec] - 1;
+    
+    if (!isLoading && self.tableView.decelerating && indexPath.section == lastSec && indexPath.row == lastRow) {
+        NSLog(@"********** more load! **********");
+        self.tableView.contentInset = UIEdgeInsetsMake(0, 0, REFRESH_HEADER_HEIGHT, 0);
+        [self performSelector:@selector(startMoreLoading) withObject:nil afterDelay:0.0];
+    }
+}
+
 - (void)startLoading {
     isLoading = YES;
-    
+
     // Show the header
-    [UIView animateWithDuration:0.3 animations:^{
-        self.tableView.contentInset = UIEdgeInsetsMake(REFRESH_HEADER_HEIGHT, 0, 0, 0);
-        refreshLabel.text = self.textLoading;
-        refreshArrow.hidden = YES;
-        [refreshSpinner startAnimating];
-    }];
-    
+    [UIView beginAnimations:nil context:NULL];
+    [UIView setAnimationDuration:0.3];
+    self.tableView.contentInset = UIEdgeInsetsMake(REFRESH_HEADER_HEIGHT, 0, 0, 0);
+    refreshLabel.text = self.textLoading;
+    refreshArrow.hidden = YES;
+    [refreshSpinner startAnimating];
+    [UIView commitAnimations];
+
     // Refresh action!
     [self refresh];
 }
 
 - (void)stopLoading {
     isLoading = NO;
-    
+
     // Hide the header
-    [UIView animateWithDuration:0.3 animations:^{
-        self.tableView.contentInset = UIEdgeInsetsZero;
-        [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI * 2, 0, 0, 1);
-    } 
-                     completion:^(BOOL finished) {
-                         [self performSelector:@selector(stopLoadingComplete)];
-                     }];
+    [UIView beginAnimations:nil context:NULL];
+    [UIView setAnimationDelegate:self];
+    [UIView setAnimationDuration:0.3];
+    [UIView setAnimationDidStopSelector:@selector(stopLoadingComplete:finished:context:)];
+    self.tableView.contentInset = UIEdgeInsetsZero;
+    UIEdgeInsets tableContentInset = self.tableView.contentInset;
+    tableContentInset.top = 0.0;
+    self.tableView.contentInset = tableContentInset;
+    [refreshArrow layer].transform = CATransform3DMakeRotation(M_PI * 2, 0, 0, 1);
+    [UIView commitAnimations];
 }
 
-- (void)stopLoadingComplete {
+- (void)stopLoadingComplete:(NSString *)animationID finished:(NSNumber *)finished context:(void *)context {
     // Reset the header
     refreshLabel.text = self.textPull;
     refreshArrow.hidden = NO;
     [refreshSpinner stopAnimating];
+}
+
+- (void)startMoreLoading {
+    isLoading = YES;
+    
+    moreFooterView.frame = CGRectMake(0, self.tableView.contentSize.height, 320, REFRESH_HEADER_HEIGHT);
+    moreFooterView.hidden = NO;
+    [moreSpinner startAnimating];
+    
+    [self loadMore];
+}
+
+- (void)stopMoreLoading {
+    isLoading = NO;
+    
+    [UIView beginAnimations:nil context:NULL];
+    [UIView setAnimationDelegate:self];
+    [UIView setAnimationDuration:0.3];
+    //self.tableView.contentInset = UIEdgeInsetsZero;
+    [UIView commitAnimations];
+    
+    moreFooterView.hidden = YES;
+    [moreSpinner stopAnimating];
 }
 
 - (void)refresh {
@@ -174,11 +242,20 @@
     [self performSelector:@selector(stopLoading) withObject:nil afterDelay:2.0];
 }
 
+- (void)loadMore {
+    // This is just a demo. Override this method with your custom reload action.
+    // Don't forget to call stopLoading at the end.
+    [self performSelector:@selector(stopMoreLoading) withObject:nil afterDelay:2.0];
+}
+
 - (void)dealloc {
     [refreshHeaderView release];
     [refreshLabel release];
     [refreshArrow release];
     [refreshSpinner release];
+    [moreFooterView release];
+    [moreLabel release];
+    [moreSpinner release];
     [textPull release];
     [textRelease release];
     [textLoading release];
