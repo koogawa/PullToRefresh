@@ -64,6 +64,17 @@
 - (void)viewDidLoad {
   [super viewDidLoad];
     
+  // ex)
+//    + (BOOL)isOverThisVersion:(NSString *)version
+//    {
+//        NSString *currentVersion = [[UIDevice currentDevice] systemVersion];
+//        return ([currentVersion compare:version options:NSNumericSearch] != NSOrderedAscending);
+//    }
+    
+  if ([self isOverThisVersion:@"7.0"]) {
+    [self setEdgesForExtendedLayout:UIExtendedEdgeNone];
+  }
+
   [self addPullToRefreshHeader];
     
     if (moreLoadEnabled) {
